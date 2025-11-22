@@ -1,6 +1,11 @@
 import os
-from fastapi import FastAPI
+from fastapi import FastAPI, UploadFile, File, Form, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
+from typing import List, Optional
+from pydantic import BaseModel
+from database import create_document, get_documents, db
+from schemas import Profile
 
 app = FastAPI()
 
@@ -14,11 +19,75 @@ app.add_middleware(
 
 @app.get("/")
 def read_root():
-    return {"message": "Hello from FastAPI Backend!"}
+    return {"message": "Portfolio backend running"}
 
-@app.get("/api/hello")
-def hello():
-    return {"message": "Hello from the backend API!"}
+@app.get("/api/profile", response_model=Profile)
+def get_profile():
+    # Get the latest profile document
+    try:
+        docs = get_documents("profile", {}, limit=1)
+        if docs:
+            doc = docs[-1]
+            # Convert Mongo's internal fields
+            doc.pop("_id", None)
+            return Profile(**doc)
+        # Default seed if none exists yet
+        return Profile(
+            name="Your Name",
+            tagline="Teacher • Programmer • Writer • Entrepreneur",
+            bio=(
+                "I love building things, sharing knowledge, and exploring ideas. "
+                "This is my corner of the internet where I collect what I do and what I know."
+            ),
+            roles=["Teacher", "Programmer", "Writer", "Entrepreneur"],
+            skills=["JavaScript", "Python", "React", "FastAPI", "Node.js", "Writing", "Teaching"],
+            hobbies=[
+                "Running",
+                "Working out",
+                "Creating fictional worlds",
+                "Travelling and sight seeing",
+                "Walking around at night",
+            ],
+            avatar_url=None,
+        )
+    except Exception as e:
+        # If DB not available, still return a sane default to keep UI working
+        return Profile(
+            name="Your Name",
+            tagline="Teacher • Programmer • Writer • Entrepreneur",
+            bio=(
+                "I love building things, sharing knowledge, and exploring ideas. "
+                "This is my corner of the internet where I collect what I do and what I know."
+            ),
+            roles=["Teacher", "Programmer", "Writer", "Entrepreneur"],
+            skills=["JavaScript", "Python", "React", "FastAPI", "Node.js", "Writing", "Teaching"],
+            hobbies=[
+                "Running",
+                "Working out",
+                "Creating fictional worlds",
+                "Travelling and sight seeing",
+                "Walking around at night",
+            ],
+            avatar_url=None,
+        )
+
+class ProfilePayload(BaseModel):
+    name: str
+    tagline: Optional[str] = None
+    bio: Optional[str] = None
+    roles: List[str] = []
+    skills: List[str] = []
+    hobbies: List[str] = []
+    avatar_url: Optional[str] = None
+
+@app.post("/api/profile")
+async def upsert_profile(payload: ProfilePayload):
+    # Save a new profile document (simple create for demo)
+    try:
+        create_document("profile", payload.model_dump())
+        return {"status": "ok"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/test")
 def test_database():
@@ -31,39 +100,31 @@ def test_database():
         "connection_status": "Not Connected",
         "collections": []
     }
-    
+
     try:
-        # Try to import database module
-        from database import db
-        
         if db is not None:
             response["database"] = "✅ Available"
             response["database_url"] = "✅ Configured"
             response["database_name"] = db.name if hasattr(db, 'name') else "✅ Connected"
             response["connection_status"] = "Connected"
-            
-            # Try to list collections to verify connectivity
+
             try:
                 collections = db.list_collection_names()
-                response["collections"] = collections[:10]  # Show first 10 collections
+                response["collections"] = collections[:10]
                 response["database"] = "✅ Connected & Working"
             except Exception as e:
                 response["database"] = f"⚠️  Connected but Error: {str(e)[:50]}"
         else:
             response["database"] = "⚠️  Available but not initialized"
-            
-    except ImportError:
-        response["database"] = "❌ Database module not found (run enable-database first)"
+
     except Exception as e:
         response["database"] = f"❌ Error: {str(e)[:50]}"
-    
-    # Check environment variables
+
     import os
     response["database_url"] = "✅ Set" if os.getenv("DATABASE_URL") else "❌ Not Set"
     response["database_name"] = "✅ Set" if os.getenv("DATABASE_NAME") else "❌ Not Set"
-    
-    return response
 
+    return response
 
 if __name__ == "__main__":
     import uvicorn
